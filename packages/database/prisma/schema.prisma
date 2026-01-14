@@ -1,0 +1,159 @@
+// packages/database/prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// --- 1. ENUMS (Strict Type Safety) ---
+
+enum Status {
+  DRAFT
+  SCHEDULED
+  PUBLISHED
+  ARCHIVED
+}
+
+enum Variant {
+  PORTRAIT
+  LANDSCAPE
+  SQUARE
+  BANNER
+}
+
+enum AssetType {
+  POSTER
+  THUMBNAIL
+  SUBTITLE
+}
+
+// Add this Enum
+enum UserRole {
+  ADMIN
+  EDITOR
+  VIEWER
+}
+
+// Update/Add User Model
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  password  String   // Will store Hashed Password
+  role      UserRole @default(VIEWER)
+  name      String?
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+}
+
+// --- 3. CMS CORE MODELS ---
+
+model Program {
+  id                String   @id @default(cuid())
+  title             String
+  description       String?
+  language_primary  String   @default("en") // e.g., "en"
+  languages_available String[] @default(["en"]) // e.g., ["en", "hi"]
+  
+  status            Status   @default(DRAFT)
+  published_at      DateTime? // Actual time it went live
+
+  created_at        DateTime @default(now())
+  updated_at        DateTime @updatedAt
+
+  // Relations
+  topics            Topic[]
+  terms             Term[]
+  assets            ProgramAsset[] // Posters per language/variant
+
+  // Indexes for high-performance filtering
+  @@index([status, language_primary])
+}
+
+model Topic {
+  id       String    @id @default(cuid())
+  name     String    @unique
+  programs Program[]
+}
+
+model Term {
+  id          String   @id @default(cuid())
+  program_id  String
+  term_number Int
+  title       String?
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+
+  program     Program  @relation(fields: [program_id], references: [id], onDelete: Cascade)
+  lessons     Lesson[]
+
+  // Constraint: Term 1 cannot exist twice in the same program
+  @@unique([program_id, term_number])
+}
+
+model Lesson {
+  id                       String   @id @default(cuid())
+  term_id                  String
+  lesson_number            Int
+  title                    String
+  
+  content_type             String   // "video" | "article"
+  duration_ms              Int?
+  is_paid                  Boolean  @default(false)
+
+  // Content (The actual learning material)
+  content_language_primary    String   @default("en")
+  content_languages_available String[] @default(["en"])
+  content_urls_by_language    Json?    @default("{}") // { "en": "youtube_url", "es": "..." }
+
+  // Workflow
+  status       Status    @default(DRAFT)
+  publish_at   DateTime? // Scheduled time (Future)
+  published_at DateTime? // Actual live time (Past)
+
+  created_at   DateTime  @default(now())
+  updated_at   DateTime  @updatedAt
+
+  // Relations
+  term         Term      @relation(fields: [term_id], references: [id], onDelete: Cascade)
+  assets       LessonAsset[] // Thumbnails & Subtitles
+
+  // Constraint: Lesson 1 cannot exist twice in the same term
+  @@unique([term_id, lesson_number])
+  
+  // Index for "Worker" services to find scheduled tasks
+  @@index([status, publish_at]) 
+}
+
+// --- 4. ASSET MANAGEMENT (Normalized) ---
+
+model ProgramAsset {
+  id         String    @id @default(cuid())
+  program_id String
+  language   String    // "en", "hi"
+  variant    Variant   // PORTRAIT, LANDSCAPE...
+  asset_type AssetType // Only POSTER allowed logic-wise
+  url        String
+
+  program    Program   @relation(fields: [program_id], references: [id], onDelete: Cascade)
+
+  // Rule: Only one "English Portrait Poster" per program
+  @@unique([program_id, language, variant, asset_type])
+}
+
+model LessonAsset {
+  id         String    @id @default(cuid())
+  lesson_id  String
+  language   String
+  variant    Variant?  // Nullable because Subtitles don't have variants (Portrait/Landscape)
+  asset_type AssetType // THUMBNAIL or SUBTITLE
+  url        String
+
+  lesson     Lesson    @relation(fields: [lesson_id], references: [id], onDelete: Cascade)
+
+  // Rule: Only one "English Thumbnail Landscape" per lesson
+  @@unique([lesson_id, language, variant, asset_type])
+}
