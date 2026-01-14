@@ -1,6 +1,7 @@
 {
   "name": "cms-challenge-root",
   "private": true,
+  "packageManager": "npm@10.2.3",
   "workspaces": [
     "apps/*",
     "packages/*"
